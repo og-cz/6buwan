@@ -54,5 +54,7 @@ UTSig's final-test set is class-balanced (345 genuine / 345 forged), unlike CEDA
 
 - CEDAR signature dataset
 - UTSig signature dataset
-- Dalal, N. & Triggs, B. Histograms of Oriented Gradients for Human Detection
-- [signver](https://github.com/victordibia/signver) signature verification library
+
+
+
+![footer](/docs/images/footer.png)
