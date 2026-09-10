@@ -71,6 +71,7 @@ Why three notebooks per dataset instead of one:
 | [`experiment_1`](cedar/notebooks/cedar_experiment_1.ipynb) | First full run of the fixed pipeline (density-crop, aspect cap, anchored-grid tuning). Superseded by a rounding bug: the aspect-cap pad used `int()`, which floors and can leave the ratio slightly over the 2.5:1 cap. |
 | [`experiment_2`](cedar/notebooks/cedar_experiment_2.ipynb) | **Locked, primary result.** Fixes `int()` → `ceil()`, adds a genuine↔forged cross-class duplicate check and a per-writer kernel-scale diagnostic, reports baselines and balanced accuracy. |
 | [`experiment_3`](cedar/notebooks/cedar_experiment_3.ipynb) | `experiment_2` plus one bounded follow-up: does giving each writer 18 training signatures instead of 12 change the RAW-vs-HOG gap? |
+| [`cedar_addendum`](cedar/notebooks/cedar_addendum.ipynb) | Not a new experiment a read-only robustness check appended to `experiment_2`'s already-locked results. Adds per-writer ROC-AUC and a paired Wilcoxon significance test, without re-tuning or re-touching final-test data. |
 
 **UTSig** (bonus cross-dataset check, run only after CEDAR was locked)
 
@@ -90,10 +91,10 @@ Why three notebooks per dataset instead of one:
 
 | | CEDAR (locked) | UTSig (cross-dataset) |
 |---|---|---|
-| Winner by F1 | HOG 0.235 vs 0.198 | RAW 0.565 vs 0.482 |
-| Winner by ROC-AUC | not computed | HOG 0.650 vs 0.583 |
-| RAW-vs-HOG difference significant? | not tested | yes Wilcoxon p < 0.05 (F1 and FRR) |
+| Winner by F1 | HOG - 0.235 vs 0.198 | RAW - 0.565 vs 0.482 |
+| Winner by ROC-AUC | HOG - 0.917 vs 0.866 | HOG - 0.650 vs 0.583 |
+| RAW-vs-HOG difference significant? | not at p < 0.05 (Wilcoxon p = 0.38 F1, p = 0.49 FRR) | yes - Wilcoxon p < 0.05 (F1 and FRR) |
 
-No universal winner. HOG's edge on CEDAR shrinks as training data grows (12 → 18 signatures/writer, F1 converges to ~0.41 for both). On UTSig, RAW wins the locked operating point on F1, but HOG actually ranks signatures better overall a reminder that "which representation wins" can depend on which metric, and which operating point, you're asking about.
+No universal winner. HOG's edge on CEDAR shrinks as training data grows (12 → 18 signatures/writer, F1 converges to ~0.41 for both), and while HOG wins CEDAR on both F1 and threshold-independent ROC-AUC, that win hasn't been shown statistically significant at the individual-writer level with only 55 writers. On UTSig, RAW wins the locked operating point on F1, but HOG actually ranks signatures better overall a reminder that "which representation wins" can depend on which metric, and which operating point, you're asking about.
 
 ![footer](docs/images/footer.png)
