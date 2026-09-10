@@ -8,7 +8,7 @@ A signature verification system deployed in practice rarely has more than a hand
 
 ## Methodology
 
-![Preprocessing steps: original → Otsu threshold → density-crop → aspect cap → resize & pad](/docs/images/6buwan-chart-full-preprocessing.png)
+![Preprocessing steps: original → Otsu threshold → density-crop → aspect cap → resize & pad](/docs/diagrams/6buwan-chart-full-preprocessing.png)
 
 ### Preprocessing
 
@@ -16,7 +16,7 @@ Every scan is binarized with an Otsu threshold to locate ink, cropped to that in
 
 Cropping itself is density-thresholded rather than triggered by any single ink pixel: a row or column only counts toward the bounding box if its ink count reaches a fixed fraction of the busiest row/column's count. This keeps a thin trailing flourish stroke from dragging the crop out into a sliver, while a hard cap on the crop's aspect ratio guards against the same failure mode surviving thresholding. Output is left in grayscale rather than re-binarized after cropping, so HOG still sees soft gradient information at stroke edges rather than a hard edge map.
 
-![Signature cleaning example: original CEDAR scans vs. cropped 100x100 output](/docs/images/signature-cleaning-result.png)
+![Signature cleaning example: original CEDAR scans vs. cropped 100x100 output](/docs/diagrams/signature-cleaning-result.png)
 
 ### Feature Representations
 
