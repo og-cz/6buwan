@@ -1,60 +1,99 @@
-# 6buwan [alpha]: A RAW-vs-HOG Pipeline for OCSVM Signature Verification
+# 6buwan [Alpha]: A RAW-vs-HOG Pipeline for OCSVM Signature Verification
 
-![6buwan logo](/docs/images/logo.png)
+> 6buwan is in Alpha. Each experiment below is a locked, reproducible run the pipeline itself is still evolving.
 
-## Motivation
+![6buwan logo](docs/images/logo.png)
 
-A signature verification system deployed in practice rarely has more than a handful of enrolled genuine signatures per person to learn from, and it almost never has access to that person's forgeries in advance. This rules out standard two-class classification and forces a one-class formulation: a model per writer, fit only to that writer's genuine samples, that must still separate genuine signatures from forgery attempts it has never seen. Given that constraint, an obvious engineering question follows: is it worth extracting a hand-designed feature like HOG at all, or does a one-class model do just as well, or better, working directly on raw pixels? HOG was built to be robust to exactly the kind of variation (stroke thickness, minor translation, local contrast) that raw pixels are sensitive to, so the intuition favors HOG. Whether that intuition survives contact with a genuinely one-class, low-data regime is the question this pipeline is built to answer, not assume.
+## Why
 
-## Methodology
+A bank holds genuine specimen signatures for a depositor, never their forgeries in advance. That rules out ordinary two-class classification and forces a one-class formulation: a model per writer, fit only to that writer's genuine samples, that still has to catch forgery attempts it has never seen. Given that constraint, an obvious question follows is it worth extracting a hand-designed feature like HOG at all, or does a one-class model do just as well working directly on raw pixels? HOG was built to tolerate exactly the variation (stroke thickness, small shifts, local contrast) that raw pixels are sensitive to, so intuition favors it. 6buwan exists to test that intuition under a genuinely one-class, low-data regime, not assume it.
 
-![Preprocessing steps: original → Otsu threshold → density-crop → aspect cap → resize & pad](/docs/diagrams/6buwan-chart-full-preprocessing.png)
+## Pipeline
 
-### Preprocessing
+![pipeline overview](docs/diagrams/pipeline-overview.png)
 
-Every scan is binarized with an Otsu threshold to locate ink, cropped to that ink's bounding box, then resized with aspect preserved and padded to a fixed 100x100 frame. A naive resize of the full scan (blank margin included) puts the signature at a different scale and position in the frame for almost every image, since scans don't share a consistent margin that inconsistency would add noise to both feature representations, but not necessarily the same amount to each, which would confound any RAW vs. HOG comparison before it starts. Cropping to ink first removes that confound; both representations are then computed from the same, consistently-framed image.
+Four stages, run identically for both feature representations so any performance gap traces back to the representation itself, not the plumbing: preprocess every scan the same way, split each writer's signatures into train / validation / final-test, extract RAW or HOG features from the same preprocessed image, then fit and score one OCSVM per writer.
 
-Cropping itself is density-thresholded rather than triggered by any single ink pixel: a row or column only counts toward the bounding box if its ink count reaches a fixed fraction of the busiest row/column's count. This keeps a thin trailing flourish stroke from dragging the crop out into a sliver, while a hard cap on the crop's aspect ratio guards against the same failure mode surviving thresholding. Output is left in grayscale rather than re-binarized after cropping, so HOG still sees soft gradient information at stroke edges rather than a hard edge map.
+## Preprocessing
 
-![Signature cleaning example: original CEDAR scans vs. cropped 100x100 output](/docs/diagrams/signature-cleaning-result.png)
+![preprocessing steps](docs/diagrams/preprocessing-steps.png)
 
-### Feature Representations
+An Otsu threshold finds the ink. A density-thresholded crop a row or column only counts if it holds at least 5% of the busiest row/column's ink removes blank margin without letting a thin trailing flourish stroke drag the crop into a sliver. A hard aspect-ratio cap (≤2.5:1) pads anything still too elongated before the final resize. Output stays grayscale rather than getting re-binarized, so HOG still sees soft gradient information at stroke edges.
 
-**RAW** is the preprocessed image flattened and normalized to a fixed-length vector, with no built-in invariance to anything. A signature's absolute pixel arrangement is the entire signal.
+```python
+if width / height > max_aspect:
+    target_h = ceil(width / max_aspect)   # ceil, not floor floor could leave the ratio over cap
+    pad = max(0, target_h - height)
+    img = np.pad(img, ((pad // 2, pad - pad // 2), (0, 0)), constant_values=0)
+```
 
-**HOG** (Dalal & Triggs: oriented gradient histograms over local cells and blocks) discards absolute pixel intensity and instead encodes local stroke direction and edge structure, which is designed to tolerate small shifts, thickness variation, and lighting differences that RAW cannot.
+![signature cleaning example](docs/images/signature-cleaning-result.png)
 
-These encode different, explicit assumptions about what makes a signature identifiable position and intensity for RAW, local gradient structure for HOG which is exactly what makes comparing them informative rather than incidental.
+## Feature Representations
 
-### Verification Model
+```python
+def create_raw_features(image_paths):
+    return np.array([preprocess_signature(p).astype(np.float32).flatten() / 255.0
+                      for p in image_paths])
 
-One RBF-kernel One-Class SVM is trained per writer, on that writer's genuine training signatures only, mirroring the enrollment-only constraint from the Motivation section above: `nu` bounds the expected fraction of training points treated as outliers, and `gamma` sets the kernel's locality. Both are tuned from a grid centered on a data-driven reference value (sklearn's `gamma='scale'` heuristic, `1 / (n_features * variance)`) fixed before any validation results are seen, rather than searched and widened reactively. RAW and HOG get their own reference gamma, computed from their own dimensionality and variance, so the two conditions are anchored fairly rather than sharing one arbitrary grid.
+def create_hog_features(image_paths):
+    return np.array([hog(preprocess_signature(p).astype(np.float32) / 255.0,
+                          orientations=9, pixels_per_cell=(8, 8),
+                          cells_per_block=(2, 2), block_norm="L2-Hys")
+                      for p in image_paths])
+```
 
-### What Makes the RAW vs. HOG Comparison Fair
+**RAW** keeps absolute pixel intensity a signature's exact position and shading is the whole signal. **HOG** discards that for local gradient direction, on the premise that stroke direction survives the shifts and thickness changes that sink raw pixels.
 
-Everything except the feature representation is held identical between the two conditions: the same preprocessing, the same writer-specific train/validation/final-test split (fixed random seed), the same scaler-fitting rule (fit only on pooled training-genuine signatures, applied everywhere else), and the same hyperparameter search procedure. Final-test data is touched exactly once, after both representations' hyperparameters are locked. Any performance gap that remains is therefore attributable to the representation itself, not to an inconsistency in how the two conditions were run.
+## Verification Model
 
-### Evaluation
+One RBF-kernel One-Class SVM per writer, trained only on that writer's own genuine signatures:
 
-Each writer's model is scored on that writer's held-out genuine and forged signatures using False Acceptance Rate, False Rejection Rate, Accuracy, Precision, Recall, F1, and Matthews Correlation Coefficient, then aggregated across writers. Results are compared against trivial reject-all and accept-all baselines and, where the test set is closer to balanced, against balanced accuracy, so that any reported gain is checked against what a non-model would achieve on the same class balance. A per-writer ROC-AUC computed from each model's `decision_function` score is used as a threshold-independent check, to separate whether a representation is weaker in general from whether it was simply weaker at the specific operating point selected by the locked hyperparameters.
+```python
+model = OneClassSVM(kernel="rbf", nu=nu, gamma=gamma)
+model.fit(X_writer_train)
+```
+
+`nu` and `gamma` are each swept over a fixed multiplier grid (0.01x–100x) centered on a data-driven reference gamma (`1 / (n_features * variance)`) RAW and HOG get their own reference, computed from their own dimensionality. Tuned once per representation, then locked before final-test data is touched.
+
+## Evaluation
+
+FAR, FRR, Accuracy, Precision, Recall, and F1 per writer, aggregated across writers, checked against reject-all / accept-all baselines and balanced accuracy since CEDAR's final-test set skews 80% forged. The UTSig cross-dataset run adds two threshold-independent checks: Matthews Correlation Coefficient (F1 alone can favor a trivial accept-all classifier on a balanced test set it did, once), and per-writer ROC-AUC from `decision_function` scores, to separate "is this representation worse" from "is it worse only at the specific operating point that got locked."
+
+## Experiments
+
+Why three notebooks per dataset instead of one:
+
+**CEDAR**
+
+| Notebook | What it is |
+|---|---|
+| [`experiment_1`](cedar/notebooks/cedar_experiment_1.ipynb) | First full run of the fixed pipeline (density-crop, aspect cap, anchored-grid tuning). Superseded by a rounding bug: the aspect-cap pad used `int()`, which floors and can leave the ratio slightly over the 2.5:1 cap. |
+| [`experiment_2`](cedar/notebooks/cedar_experiment_2.ipynb) | **Locked, primary result.** Fixes `int()` → `ceil()`, adds a genuine↔forged cross-class duplicate check and a per-writer kernel-scale diagnostic, reports baselines and balanced accuracy. |
+| [`experiment_3`](cedar/notebooks/cedar_experiment_3.ipynb) | `experiment_2` plus one bounded follow-up: does giving each writer 18 training signatures instead of 12 change the RAW-vs-HOG gap? |
+
+**UTSig** (bonus cross-dataset check, run only after CEDAR was locked)
+
+| Notebook | What it is |
+|---|---|
+| [`experiment_1`](utsig/notebooks/utsig_experiment_1.ipynb) | First UTSig run, CEDAR's locked pipeline reused as-is. |
+| [`experiment_2`](utsig/notebooks/utsig_experiment_2.ipynb) | Methodology hardening after review: a cross-split duplicate-leak check (a signature byte-identical across train/validation/test would invalidate the split), a wider gamma grid, MCC, and per-writer ROC-AUC. |
+| [`experiment_3`](utsig/notebooks/utsig_experiment_3.ipynb) | Adds one more angle on `experiment_2`'s real output: re-sorting the same validation grid by MCC instead of F1 surfaces a different operating point, reported side-by-side with the locked F1 result rather than replacing it. |
 
 ## Datasets
 
-### CEDAR
+**CEDAR** - 55 writers, 24 genuine + 24 forged each. Per writer: 12 genuine train / 3 genuine + 12 forged validation / 3 genuine + 12 forged final-test. Forgeries are never used for training.
 
-Experiments are run on the **CEDAR** offline signature dataset (55 writers, 24 genuine and 24 forged signatures each). Per writer, genuine signatures are split 12 train / 3 validation / 3 final-test; forged signatures are used only for validation (12) and final testing (12), never for training, consistent with the one-class formulation above. This leaves the final-test set skewed 80% forged (165 genuine / 660 forged overall), for which trivial reject-all and accept-all baselines are reported alongside balanced accuracy. A supplementary experiment uses the 6 genuine signatures per writer left untouched by the main split, growing training to 18 genuine signatures per writer while validation and final-test stay at 3 each, to ask directly whether more enrolled reference signatures improves either representation.
+**UTSig** - 115 writers, 27 genuine + 6 skilled-forged each. Chosen because it's the only major alternative to CEDAR that isn't capped at the same 24 genuine/writer (GPDS is withdrawn; BHSig260 caps at 24; MCYT-75 offers only 15). Genuine split 21 / 3 / 3, skilled forgeries split 3 / 3 (validation / final-test), none held out for training.
 
-### UTSig
+## Key Findings So Far
 
-**UTSig** is used as a bonus cross-dataset check, run only after the CEDAR pipeline was locked. It was selected after surveying the available alternatives (GPDS, withdrawn for GDPR reasons; its replacements and BHSig260, capped at the same 24 genuine/writer as CEDAR; MCYT-75, only 15 genuine/writer) as the only dataset offering more genuine references per writer than CEDAR: 115 writers with 27 genuine and 6 skilled-forged signatures each, confirmed against the downloaded data rather than assumed from documentation. Genuine signatures are split 21 train / 3 validation / 3 final-test, using every available signature with none left over; skilled forgeries are split 3 validation / 3 final-test, with none held out for training. Skilled forgeries are used rather than UTSig's simple or opposite-hand forgeries because they are the closest analog to CEDAR's forged class and the standard hardest-case benchmark in this literature.
+| | CEDAR (locked) | UTSig (cross-dataset) |
+|---|---|---|
+| Winner by F1 | HOG 0.235 vs 0.198 | RAW 0.565 vs 0.482 |
+| Winner by ROC-AUC | not computed | HOG 0.650 vs 0.583 |
+| RAW-vs-HOG difference significant? | not tested | yes Wilcoxon p < 0.05 (F1 and FRR) |
 
-UTSig's final-test set is class-balanced (345 genuine / 345 forged), unlike CEDAR's 80%-forged split, so its trivial baselines and what counts as "beating the baseline" are not directly comparable to CEDAR's without accounting for this. The pipeline (preprocessing, feature extraction, scaler-fitting rule, reference-gamma method, and hyperparameter grid) is reused from CEDAR's locked configuration rather than re-tuned for UTSig, to keep the cross-dataset comparison methodological rather than a second round of fitting to validation.
+No universal winner. HOG's edge on CEDAR shrinks as training data grows (12 → 18 signatures/writer, F1 converges to ~0.41 for both). On UTSig, RAW wins the locked operating point on F1, but HOG actually ranks signatures better overall a reminder that "which representation wins" can depend on which metric, and which operating point, you're asking about.
 
-## References
-
-- CEDAR signature dataset
-- UTSig signature dataset
-
-
-
-![footer](/docs/images/footer.png)
+![footer](docs/images/footer.png)
