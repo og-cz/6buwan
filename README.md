@@ -97,4 +97,15 @@ Why three notebooks per dataset instead of one:
 
 No universal winner. HOG's edge on CEDAR shrinks as training data grows (12 → 18 signatures/writer, F1 converges to ~0.41 for both), and while HOG wins CEDAR on both F1 and threshold-independent ROC-AUC, that win hasn't been shown statistically significant at the individual-writer level with only 55 writers. On UTSig, RAW wins the locked operating point on F1, but HOG actually ranks signatures better overall a reminder that "which representation wins" can depend on which metric, and which operating point, you're asking about.
 
+
+## Next Phase: 4buwan
+
+6buwan compares representations, but it leaves a practical question open: a bank enrolls only a handful of genuine signatures per depositor, and a single shared model setting may not suit every writer. [4buwan](https://github.com/og-cz/4buwan) is the next phase. It keeps 6buwan's preprocessing, dataset, and features, and asks whether each writer's one-class model can be set up from that writer's own genuine enrollment samples alone, without forgeries.
+
+**Related work.** Guerbai et al. (2015) addressed limited-sample boundary placement in one-class signature verification with a single threshold shared by all writers. Starovoitov and Akhundjanov (2024) proposed comparing signatures in a pairwise similarity space built from a writer's own samples. To our knowledge, neither sets parameters per writer from genuine-only data. 4buwan explores that gap.
+
+**Approach.** Each writer's model parameters are chosen from that writer's enrollment signatures only, and the method is then compared against 6buwan's fixed global setting.
+
+4buwan is still in development.
+
 ![footer](docs/images/footer.png)
