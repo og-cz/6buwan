@@ -1,6 +1,6 @@
 # 6buwan [Alpha]: A RAW-vs-HOG Pipeline for OCSVM Signature Verification
 
-> 6buwan is in Alpha. Each experiment below is a locked, reproducible run the pipeline itself is still evolving. [4buwan](https://github.com/og-cz/4buwan) is the next phase
+> 6buwan is in Alpha. Each experiment below is a locked, reproducible run the pipeline itself is still evolving. [4buwan](https://github.com/og-cz/4buwan) is the next phase.
 
 ![6buwan logo](docs/images/logo.png)
 
